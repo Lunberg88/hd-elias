@@ -68,6 +68,11 @@ function loadCategories(): Category[] {
   return defaultWordsData.categories as Category[];
 }
 
+// Helper to get guessed word keys (word + categoryId) for quick lookup
+function getGuessedWordKeys(guessedWords: GuessedWord[]): Set<string> {
+  return new Set(guessedWords.map((w) => `${w.categoryId}:${w.word}`));
+}
+
 function createGameReducer(getCategories: () => Category[]) {
   return function gameReducer(state: GameState, action: GameAction): GameState {
     switch (action.type) {
@@ -111,7 +116,6 @@ function createGameReducer(getCategories: () => Category[]) {
         return {
           ...state,
           currentCategoryId: action.payload,
-          currentRoundTeamsPlayed: [],
         };
 
       case 'START_ROUND': {
@@ -120,7 +124,18 @@ function createGameReducer(getCategories: () => Category[]) {
 
         if (!category) return state;
 
-        const shuffledWords = shuffleArray([...category.words]);
+        // Filter out already guessed words (globally, from any team)
+        const guessedWordKeys = getGuessedWordKeys(state.guessedWords);
+        const availableWords = category.words.filter(
+          (word) => !guessedWordKeys.has(`${state.currentCategoryId}:${word.word}`)
+        );
+
+        // If no words available, don't start
+        if (availableWords.length === 0) {
+          return state;
+        }
+
+        const shuffledWords = shuffleArray([...availableWords]);
         const [firstWord, ...restWords] = shuffledWords;
 
         return {
@@ -256,61 +271,100 @@ function createGameReducer(getCategories: () => Category[]) {
         };
 
       case 'FINISH_TEAM_TURN': {
+        // Save category result for this turn
+        const categories = getCategories();
+        const category = categories.find((c) => c.id === state.currentCategoryId);
         const currentTeam = state.teams[state.currentTeamIndex];
-        const updatedTeamsPlayed = [...state.currentRoundTeamsPlayed, currentTeam.id];
-        const allTeamsPlayed = updatedTeamsPlayed.length >= state.teams.length;
 
-        if (allTeamsPlayed) {
-          // All teams have played this category - save results and mark category as complete
-          const categories = getCategories();
-          const category = categories.find((c) => c.id === state.currentCategoryId);
+        // Get words guessed by current team in current category during this turn
+        const turnWords = state.guessedWords.filter(
+          (w) => w.teamId === currentTeam.id && w.categoryId === state.currentCategoryId
+        );
+
+        // Check if we already have a result for this category
+        const existingResultIndex = state.categoryResults.findIndex(
+          (r) => r.categoryId === state.currentCategoryId
+        );
+
+        let updatedCategoryResults = [...state.categoryResults];
+
+        if (existingResultIndex >= 0) {
+          // Update existing result with new team data
+          const existingResult = updatedCategoryResults[existingResultIndex];
+          const existingTeamIndex = existingResult.teamResults.findIndex(
+            (tr) => tr.teamId === currentTeam.id
+          );
+
+          const wordsWithHint = turnWords.filter((w) => w.usedHint).length;
+          const wordsWithoutHint = turnWords.length - wordsWithHint;
+          const score = wordsWithoutHint - wordsWithHint;
+
+          const teamResult = {
+            teamId: currentTeam.id,
+            teamName: currentTeam.name,
+            wordsGuessed: turnWords.length,
+            wordsWithHint,
+            score,
+          };
+
+          if (existingTeamIndex >= 0) {
+            existingResult.teamResults[existingTeamIndex] = teamResult;
+          } else {
+            existingResult.teamResults.push(teamResult);
+          }
+        } else if (turnWords.length > 0) {
+          // Create new result for this category
+          const wordsWithHint = turnWords.filter((w) => w.usedHint).length;
+          const wordsWithoutHint = turnWords.length - wordsWithHint;
+          const score = wordsWithoutHint - wordsWithHint;
 
           const categoryResult: CategoryRoundResult = {
             categoryId: state.currentCategoryId || '',
             categoryName: category?.name || '',
             categoryIcon: category?.icon || '',
-            teamResults: state.teams.map((team) => {
-              const teamWords = state.guessedWords.filter(
-                (w) => w.teamId === team.id && w.categoryId === state.currentCategoryId
-              );
-              const wordsWithHint = teamWords.filter((w) => w.usedHint).length;
-              const wordsWithoutHint = teamWords.length - wordsWithHint;
-              const score = wordsWithoutHint - wordsWithHint;
-
-              return {
-                teamId: team.id,
-                teamName: team.name,
-                wordsGuessed: teamWords.length,
+            teamResults: [
+              {
+                teamId: currentTeam.id,
+                teamName: currentTeam.name,
+                wordsGuessed: turnWords.length,
                 wordsWithHint,
                 score,
-              };
-            }),
+              },
+            ],
           };
+          updatedCategoryResults.push(categoryResult);
+        }
 
-          const updatedPlayedCategories = [...state.playedCategories, state.currentCategoryId || ''];
-          const allCategoriesPlayed = state.tournamentCategories.every(
-            (catId) => updatedPlayedCategories.includes(catId)
+        // Check if ALL tournament categories have 0 remaining words
+        const guessedWordKeys = getGuessedWordKeys(state.guessedWords);
+        const allCategoriesEmpty = state.tournamentCategories.every((catId) => {
+          const cat = categories.find((c) => c.id === catId);
+          if (!cat) return true;
+          const remainingWords = cat.words.filter(
+            (word) => !guessedWordKeys.has(`${catId}:${word.word}`)
           );
+          return remainingWords.length === 0;
+        });
 
+        if (allCategoriesEmpty) {
           return {
             ...state,
-            currentRoundTeamsPlayed: updatedTeamsPlayed,
-            playedCategories: updatedPlayedCategories,
-            categoryResults: [...state.categoryResults, categoryResult],
-            status: allCategoriesPlayed ? 'tournament-end' : 'category-select',
-            currentCategoryId: allCategoriesPlayed ? state.currentCategoryId : null,
-            currentTeamIndex: 0,
+            categoryResults: updatedCategoryResults,
+            status: 'tournament-end',
+            currentCategoryId: null,
+            isTimerRunning: false,
           };
         }
 
-        // Next team plays the same category
+        // Next team's turn - always go to category select
         const nextTeamIndex = (state.currentTeamIndex + 1) % state.teams.length;
 
         return {
           ...state,
-          currentRoundTeamsPlayed: updatedTeamsPlayed,
+          categoryResults: updatedCategoryResults,
           currentTeamIndex: nextTeamIndex,
-          status: 'category-select', // Back to category select to show "Start Round" for next team
+          currentCategoryId: null, // Reset so next team can choose any category
+          status: 'category-select',
           timerSeconds: TIMER_DURATION,
           hintUsed: false,
           showHint: false,
@@ -321,7 +375,6 @@ function createGameReducer(getCategories: () => Category[]) {
         return {
           ...state,
           currentCategoryId: null,
-          currentRoundTeamsPlayed: [],
           status: 'category-select',
         };
       }
@@ -353,7 +406,7 @@ function createGameReducer(getCategories: () => Category[]) {
           playedCategories: [],
           currentRoundTeamsPlayed: [],
           wordsQueue: [],
-          guessedWords: [],
+          guessedWords: [], // Reset all guessed words
           skippedWords: [],
           timerSeconds: TIMER_DURATION,
           isTimerRunning: false,
@@ -382,6 +435,8 @@ interface GameContextType {
   loadFromLocalStorage: () => boolean;
   refreshCategories: () => void;
   getCategoryById: (id: string) => Category | undefined;
+  getRemainingWordsCount: (categoryId: string) => { remaining: number; total: number };
+  getTotalRemainingWords: () => number;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -400,6 +455,30 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const getCategoryById = useCallback((id: string) => {
     return categories.find((c) => c.id === id);
   }, [categories]);
+
+  // Get remaining words count for a category
+  const getRemainingWordsCount = useCallback(
+    (categoryId: string): { remaining: number; total: number } => {
+      const category = categories.find((c) => c.id === categoryId);
+      if (!category) return { remaining: 0, total: 0 };
+
+      const guessedWordKeys = getGuessedWordKeys(state.guessedWords);
+      const remaining = category.words.filter(
+        (word) => !guessedWordKeys.has(`${categoryId}:${word.word}`)
+      ).length;
+
+      return { remaining, total: category.words.length };
+    },
+    [categories, state.guessedWords]
+  );
+
+  // Get total remaining words across all tournament categories
+  const getTotalRemainingWords = useCallback((): number => {
+    return state.tournamentCategories.reduce((total, catId) => {
+      const { remaining } = getRemainingWordsCount(catId);
+      return total + remaining;
+    }, 0);
+  }, [state.tournamentCategories, getRemainingWordsCount]);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -479,6 +558,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     loadFromLocalStorage,
     refreshCategories,
     getCategoryById,
+    getRemainingWordsCount,
+    getTotalRemainingWords,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

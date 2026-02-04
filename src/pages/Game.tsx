@@ -11,7 +11,7 @@ import {
 
 export function Game() {
   const navigate = useNavigate();
-  const { state, dispatch, categories, getCategoryById } = useGame();
+  const { state, dispatch, categories, getCategoryById, getRemainingWordsCount } = useGame();
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showEndGameModal, setShowEndGameModal] = useState(false);
   const [showPauseModal, setShowPauseModal] = useState(false);
@@ -25,12 +25,12 @@ export function Game() {
   const currentTeam = state.teams[state.currentTeamIndex];
   const currentCategory = state.currentCategoryId ? getCategoryById(state.currentCategoryId) : null;
 
-  // Get available categories (not yet played in tournament)
-  const availableCategories = categories.filter(
-    (cat) =>
-      state.tournamentCategories.includes(cat.id) &&
-      !state.playedCategories.includes(cat.id)
-  );
+  // Get available categories (tournament categories with remaining words)
+  const availableCategories = categories.filter((cat) => {
+    if (!state.tournamentCategories.includes(cat.id)) return false;
+    const { remaining } = getRemainingWordsCount(cat.id);
+    return remaining > 0;
+  });
 
   // Calculate current round score for display
   const currentTurnWords = state.guessedWords.filter(
@@ -196,16 +196,42 @@ export function Game() {
 
           {isNextTeamSameCategory ? (
             // Same category, next team's turn
-            <div className="card p-8 text-center mb-6">
-              <div className="text-6xl mb-4">{currentCategory?.icon}</div>
-              <h2 className="text-2xl font-bold mb-2">{currentCategory?.name}</h2>
-              <p className="text-white/60 mb-6">
-                Тепер грає <span className="text-white font-semibold">{currentTeam?.name}</span>
-              </p>
-              <button onClick={handleStartRound} className="btn-success text-xl py-4 px-8">
-                🎬 Почати!
-              </button>
-            </div>
+            (() => {
+              const { remaining, total } = currentCategory ? getRemainingWordsCount(currentCategory.id) : { remaining: 0, total: 0 };
+              const hasWordsRemaining = remaining > 0;
+
+              return (
+                <div className="card p-8 text-center mb-6">
+                  <div className="text-6xl mb-4">{currentCategory?.icon}</div>
+                  <h2 className="text-2xl font-bold mb-2">{currentCategory?.name}</h2>
+                  <p className="text-sm text-white/60 mb-2">
+                    {remaining}/{total} слів залишилось
+                  </p>
+                  {hasWordsRemaining ? (
+                    <>
+                      <p className="text-white/60 mb-6">
+                        Тепер грає <span className="text-white font-semibold">{currentTeam?.name}</span>
+                      </p>
+                      <button onClick={handleStartRound} className="btn-success text-xl py-4 px-8">
+                        🎬 Почати!
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-yellow-400 mb-6">
+                        У цій категорії не залишилося слів! Оберіть іншу категорію.
+                      </p>
+                      <button
+                        onClick={() => dispatch({ type: 'NEXT_CATEGORY' })}
+                        className="btn-primary text-xl py-4 px-8"
+                      >
+                        🔄 Обрати іншу категорію
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })()
           ) : (
             // Select a new category
             <div className="card p-6 mb-6">
@@ -217,6 +243,7 @@ export function Game() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {availableCategories.map((category) => {
                     const isSelected = state.currentCategoryId === category.id;
+                    const { remaining, total } = getRemainingWordsCount(category.id);
 
                     return (
                       <button
@@ -226,27 +253,36 @@ export function Game() {
                       >
                         <div className="text-4xl mb-3">{category.icon}</div>
                         <h3 className="text-lg font-semibold mb-2">{category.name}</h3>
-                        <p className="text-sm text-white/60">{category.words.length} слів</p>
+                        <p className="text-sm text-white/60">
+                          {remaining}/{total} слів
+                        </p>
                       </button>
                     );
                   })}
                 </div>
               ) : (
                 <p className="text-center text-white/60 py-8">
-                  Всі категорії зіграно!
+                  Всі слова у всіх категоріях вгадано! 🎉
                 </p>
               )}
             </div>
           )}
 
-          {!isNextTeamSameCategory && state.currentCategoryId && (
-            <button
-              onClick={handleStartRound}
-              className="btn-success w-full text-xl py-4"
-            >
-              🎬 Почати раунд: {currentCategory?.name}
-            </button>
-          )}
+          {!isNextTeamSameCategory && state.currentCategoryId && (() => {
+            const { remaining } = getRemainingWordsCount(state.currentCategoryId);
+            return remaining > 0 ? (
+              <button
+                onClick={handleStartRound}
+                className="btn-success w-full text-xl py-4"
+              >
+                🎬 Почати раунд: {currentCategory?.name}
+              </button>
+            ) : (
+              <p className="text-center text-yellow-400 py-4">
+                У цій категорії не залишилося слів! Оберіть іншу.
+              </p>
+            );
+          })()}
 
           {/* Progress indicator */}
           <div className="mt-6 text-center">
