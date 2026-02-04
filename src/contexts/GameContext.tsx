@@ -292,10 +292,12 @@ function createGameReducer(getCategories: () => Category[]) {
 
       case 'TICK_TIMER': {
         if (state.timerSeconds <= 1) {
-          // Timer expired - handle based on hint usage
+          // Timer expired - move to next word
+          const [nextWord, ...restWords] = state.wordsQueue;
+          const currentTeam = state.teams[state.currentTeamIndex];
+
           if (state.hintUsed && state.currentWord && state.currentCategoryId) {
             // Hint was used: -1 point, word is considered used
-            const currentTeam = state.teams[state.currentTeamIndex];
             const timerExpiredWord: GuessedWord = {
               word: state.currentWord.word,
               teamId: currentTeam.id,
@@ -310,22 +312,64 @@ function createGameReducer(getCategories: () => Category[]) {
                 : team
             );
 
+            // If no more words, end round
+            if (!nextWord) {
+              return {
+                ...state,
+                teams: updatedTeams,
+                guessedWords: [...state.guessedWords, timerExpiredWord],
+                currentWord: null,
+                wordsQueue: [],
+                timerSeconds: 0,
+                isTimerRunning: false,
+                hintUsed: false,
+                showHint: false,
+                status: 'round-end',
+              };
+            }
+
+            // Move to next word
             return {
               ...state,
               teams: updatedTeams,
               guessedWords: [...state.guessedWords, timerExpiredWord],
+              currentWord: nextWord,
+              wordsQueue: restWords,
+              timerSeconds: TIMER_DURATION,
+              hintUsed: false,
+              showHint: false,
+            };
+          }
+
+          // No hint used: 0 points, word returns to pool (skippedWords)
+          // If no more words, end round
+          if (!nextWord) {
+            return {
+              ...state,
+              skippedWords: state.currentWord
+                ? [...state.skippedWords, state.currentWord]
+                : state.skippedWords,
+              currentWord: null,
+              wordsQueue: [],
               timerSeconds: 0,
               isTimerRunning: false,
+              hintUsed: false,
+              showHint: false,
               status: 'round-end',
             };
           }
 
-          // No hint used: 0 points, word returns to pool (not added to guessedWords)
+          // Move to next word
           return {
             ...state,
-            timerSeconds: 0,
-            isTimerRunning: false,
-            status: 'round-end',
+            skippedWords: state.currentWord
+              ? [...state.skippedWords, state.currentWord]
+              : state.skippedWords,
+            currentWord: nextWord,
+            wordsQueue: restWords,
+            timerSeconds: TIMER_DURATION,
+            hintUsed: false,
+            showHint: false,
           };
         }
         return { ...state, timerSeconds: state.timerSeconds - 1 };
