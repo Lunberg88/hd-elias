@@ -218,9 +218,20 @@ function createGameReducer(getCategories: () => Category[]) {
 
         const [nextWord, ...restWords] = state.wordsQueue;
 
+        // Apply penalty if hint was used: -1 point
+        let updatedTeams = state.teams;
+        if (state.hintUsed) {
+          updatedTeams = state.teams.map((team, index) =>
+            index === state.currentTeamIndex
+              ? { ...team, score: Math.max(0, team.score - HINT_PENALTY) }
+              : team
+          );
+        }
+
         if (!nextWord) {
           return {
             ...state,
+            teams: updatedTeams,
             skippedWords: [...state.skippedWords, state.currentWord],
             currentWord: null,
             wordsQueue: [],
@@ -233,6 +244,7 @@ function createGameReducer(getCategories: () => Category[]) {
 
         return {
           ...state,
+          teams: updatedTeams,
           skippedWords: [...state.skippedWords, state.currentWord],
           currentWord: nextWord,
           wordsQueue: restWords,

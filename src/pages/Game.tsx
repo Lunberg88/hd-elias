@@ -356,9 +356,9 @@ export function Game() {
           <button
             onClick={handleWordSkipped}
             disabled={!state.currentWord}
-            className="btn-secondary flex-1 text-lg"
+            className={`flex-1 text-lg ${state.hintUsed ? 'btn-warning' : 'btn-secondary'}`}
           >
-            ⏭️ Пропустити (0)
+            ⏭️ Пропустити {state.hintUsed ? '(−1 бал)' : '(0)'}
           </button>
         </div>
 
