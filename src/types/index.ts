@@ -31,32 +31,50 @@ export interface Team {
 export interface GuessedWord {
   word: string;
   teamId: string;
+  categoryId: string;
   usedHint: boolean;
   timestamp: number;
 }
 
+// Results for a single category round
+export interface CategoryRoundResult {
+  categoryId: string;
+  categoryName: string;
+  categoryIcon: string;
+  teamResults: {
+    teamId: string;
+    teamName: string;
+    wordsGuessed: number;
+    wordsWithHint: number;
+    score: number;
+  }[];
+}
+
 export interface GameState {
   roomCode: string;
-  status: 'waiting' | 'category-select' | 'playing' | 'round-end' | 'game-over';
+  status: 'waiting' | 'tournament-setup' | 'category-select' | 'playing' | 'round-end' | 'tournament-end';
   teams: Team[];
   currentTeamIndex: number;
   currentWord: Word | null;
-  currentCategory: Category | null;
-  selectedCategories: string[];
+  currentCategoryId: string | null;
+  // Tournament settings
+  tournamentCategories: string[]; // Categories selected for the tournament
+  playedCategories: string[]; // Categories that have been completed by all teams
+  currentRoundTeamsPlayed: string[]; // Which teams have played current category
+  // Round state
   wordsQueue: Word[];
   guessedWords: GuessedWord[];
   skippedWords: Word[];
   timerSeconds: number;
   isTimerRunning: boolean;
-  roundNumber: number;
-  totalRounds: number;
   hintUsed: boolean;
   showHint: boolean;
+  // Results tracking
+  categoryResults: CategoryRoundResult[];
 }
 
 export interface RoomSettings {
   timerDuration: number;
-  totalRounds: number;
   pointsPerWord: number;
   hintPenalty: number;
 }
@@ -67,8 +85,8 @@ export type GameAction =
   | { type: 'ADD_PLAYER'; payload: { teamId: string; player: Player } }
   | { type: 'REMOVE_PLAYER'; payload: { teamId: string; playerId: string } }
   | { type: 'SET_TEAMS'; payload: Team[] }
-  | { type: 'SELECT_CATEGORY'; payload: Category }
-  | { type: 'SET_SELECTED_CATEGORIES'; payload: string[] }
+  | { type: 'SET_TOURNAMENT_CATEGORIES'; payload: string[] }
+  | { type: 'SELECT_CATEGORY'; payload: string }
   | { type: 'START_ROUND' }
   | { type: 'NEXT_WORD' }
   | { type: 'WORD_GUESSED' }
@@ -78,9 +96,11 @@ export type GameAction =
   | { type: 'PAUSE_TIMER' }
   | { type: 'RESUME_TIMER' }
   | { type: 'END_ROUND' }
-  | { type: 'NEXT_TEAM' }
+  | { type: 'FINISH_TEAM_TURN' }
+  | { type: 'NEXT_CATEGORY' }
   | { type: 'UPDATE_SCORE'; payload: { teamId: string; score: number } }
   | { type: 'RESET_GAME' }
+  | { type: 'RESET_TOURNAMENT' }
   | { type: 'LOAD_STATE'; payload: GameState };
 
 export interface PeerMessage {

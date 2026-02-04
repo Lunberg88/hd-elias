@@ -42,8 +42,8 @@ export function WordHistory({ guessedWords, teams }: WordHistoryProps) {
                         з підказкою
                       </span>
                     )}
-                    <span className={`font-bold ${word.usedHint ? 'text-white/60' : 'text-green-400'}`}>
-                      {word.usedHint ? '0' : '+1'}
+                    <span className={`font-bold ${word.usedHint ? 'text-red-400' : 'text-green-400'}`}>
+                      {word.usedHint ? '−1' : '+1'}
                     </span>
                   </div>
                 </div>

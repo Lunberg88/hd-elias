@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useState } from 'react';
-import { GameState, GameAction, Team, Word, Category, GuessedWord } from '../types';
+import { GameState, GameAction, Team, Category, GuessedWord, CategoryRoundResult } from '../types';
 import defaultWordsData from '../data/words.json';
 
 const TIMER_DURATION = 60;
@@ -30,17 +30,18 @@ const initialState: GameState = {
   teams: initialTeams,
   currentTeamIndex: 0,
   currentWord: null,
-  currentCategory: null,
-  selectedCategories: [],
+  currentCategoryId: null,
+  tournamentCategories: [],
+  playedCategories: [],
+  currentRoundTeamsPlayed: [],
   wordsQueue: [],
   guessedWords: [],
   skippedWords: [],
   timerSeconds: TIMER_DURATION,
   isTimerRunning: false,
-  roundNumber: 1,
-  totalRounds: 4,
   hintUsed: false,
   showHint: false,
+  categoryResults: [],
 };
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -52,7 +53,6 @@ function shuffleArray<T>(array: T[]): T[] {
   return shuffled;
 }
 
-// Load categories from localStorage or default
 function loadCategories(): Category[] {
   const saved = localStorage.getItem(WORDS_STORAGE_KEY);
   if (saved) {
@@ -104,25 +104,23 @@ function createGameReducer(getCategories: () => Category[]) {
       case 'SET_TEAMS':
         return { ...state, teams: action.payload };
 
-      case 'SELECT_CATEGORY':
-        return { ...state, currentCategory: action.payload };
+      case 'SET_TOURNAMENT_CATEGORIES':
+        return { ...state, tournamentCategories: action.payload };
 
-      case 'SET_SELECTED_CATEGORIES':
-        return { ...state, selectedCategories: action.payload };
+      case 'SELECT_CATEGORY':
+        return {
+          ...state,
+          currentCategoryId: action.payload,
+          currentRoundTeamsPlayed: [],
+        };
 
       case 'START_ROUND': {
-        // Collect all words from selected categories using current categories
         const categories = getCategories();
-        const allWords: Word[] = [];
-        state.selectedCategories.forEach((categoryId) => {
-          const category = categories.find((c) => c.id === categoryId);
-          if (category) {
-            allWords.push(...category.words);
-          }
-        });
+        const category = categories.find((c) => c.id === state.currentCategoryId);
 
-        // Shuffle and set up queue
-        const shuffledWords = shuffleArray(allWords);
+        if (!category) return state;
+
+        const shuffledWords = shuffleArray([...category.words]);
         const [firstWord, ...restWords] = shuffledWords;
 
         return {
@@ -134,6 +132,7 @@ function createGameReducer(getCategories: () => Category[]) {
           isTimerRunning: true,
           hintUsed: false,
           showHint: false,
+          skippedWords: [],
         };
       }
 
@@ -149,18 +148,20 @@ function createGameReducer(getCategories: () => Category[]) {
       }
 
       case 'WORD_GUESSED': {
-        if (!state.currentWord) return state;
+        if (!state.currentWord || !state.currentCategoryId) return state;
+
+        const currentTeam = state.teams[state.currentTeamIndex];
 
         const guessedWord: GuessedWord = {
           word: state.currentWord.word,
-          teamId: state.teams[state.currentTeamIndex].id,
+          teamId: currentTeam.id,
+          categoryId: state.currentCategoryId,
           usedHint: state.hintUsed,
           timestamp: Date.now(),
         };
 
-        const pointChange = state.hintUsed
-          ? POINTS_PER_WORD - HINT_PENALTY
-          : POINTS_PER_WORD;
+        // Calculate points: +1 without hint, -1 with hint
+        const pointChange = state.hintUsed ? -HINT_PENALTY : POINTS_PER_WORD;
 
         const updatedTeams = state.teams.map((team, index) =>
           index === state.currentTeamIndex
@@ -170,14 +171,30 @@ function createGameReducer(getCategories: () => Category[]) {
 
         const [nextWord, ...restWords] = state.wordsQueue;
 
+        // If no more words, end the turn
+        if (!nextWord) {
+          return {
+            ...state,
+            teams: updatedTeams,
+            guessedWords: [...state.guessedWords, guessedWord],
+            currentWord: null,
+            wordsQueue: [],
+            hintUsed: false,
+            showHint: false,
+            isTimerRunning: false,
+            status: 'round-end',
+          };
+        }
+
         return {
           ...state,
           teams: updatedTeams,
           guessedWords: [...state.guessedWords, guessedWord],
-          currentWord: nextWord || null,
+          currentWord: nextWord,
           wordsQueue: restWords,
           hintUsed: false,
           showHint: false,
+          timerSeconds: TIMER_DURATION,
         };
       }
 
@@ -186,13 +203,27 @@ function createGameReducer(getCategories: () => Category[]) {
 
         const [nextWord, ...restWords] = state.wordsQueue;
 
+        if (!nextWord) {
+          return {
+            ...state,
+            skippedWords: [...state.skippedWords, state.currentWord],
+            currentWord: null,
+            wordsQueue: [],
+            hintUsed: false,
+            showHint: false,
+            isTimerRunning: false,
+            status: 'round-end',
+          };
+        }
+
         return {
           ...state,
           skippedWords: [...state.skippedWords, state.currentWord],
-          currentWord: nextWord || null,
+          currentWord: nextWord,
           wordsQueue: restWords,
           hintUsed: false,
           showHint: false,
+          timerSeconds: TIMER_DURATION,
         };
       }
 
@@ -224,26 +255,74 @@ function createGameReducer(getCategories: () => Category[]) {
           isTimerRunning: false,
         };
 
-      case 'NEXT_TEAM': {
-        const nextTeamIndex = (state.currentTeamIndex + 1) % state.teams.length;
-        const isNewRound = nextTeamIndex === 0;
-        const newRoundNumber = isNewRound ? state.roundNumber + 1 : state.roundNumber;
+      case 'FINISH_TEAM_TURN': {
+        const currentTeam = state.teams[state.currentTeamIndex];
+        const updatedTeamsPlayed = [...state.currentRoundTeamsPlayed, currentTeam.id];
+        const allTeamsPlayed = updatedTeamsPlayed.length >= state.teams.length;
 
-        if (newRoundNumber > state.totalRounds) {
+        if (allTeamsPlayed) {
+          // All teams have played this category - save results and mark category as complete
+          const categories = getCategories();
+          const category = categories.find((c) => c.id === state.currentCategoryId);
+
+          const categoryResult: CategoryRoundResult = {
+            categoryId: state.currentCategoryId || '',
+            categoryName: category?.name || '',
+            categoryIcon: category?.icon || '',
+            teamResults: state.teams.map((team) => {
+              const teamWords = state.guessedWords.filter(
+                (w) => w.teamId === team.id && w.categoryId === state.currentCategoryId
+              );
+              const wordsWithHint = teamWords.filter((w) => w.usedHint).length;
+              const wordsWithoutHint = teamWords.length - wordsWithHint;
+              const score = wordsWithoutHint - wordsWithHint;
+
+              return {
+                teamId: team.id,
+                teamName: team.name,
+                wordsGuessed: teamWords.length,
+                wordsWithHint,
+                score,
+              };
+            }),
+          };
+
+          const updatedPlayedCategories = [...state.playedCategories, state.currentCategoryId || ''];
+          const allCategoriesPlayed = state.tournamentCategories.every(
+            (catId) => updatedPlayedCategories.includes(catId)
+          );
+
           return {
             ...state,
-            status: 'game-over',
+            currentRoundTeamsPlayed: updatedTeamsPlayed,
+            playedCategories: updatedPlayedCategories,
+            categoryResults: [...state.categoryResults, categoryResult],
+            status: allCategoriesPlayed ? 'tournament-end' : 'category-select',
+            currentCategoryId: allCategoriesPlayed ? state.currentCategoryId : null,
+            currentTeamIndex: 0,
           };
         }
 
+        // Next team plays the same category
+        const nextTeamIndex = (state.currentTeamIndex + 1) % state.teams.length;
+
         return {
           ...state,
+          currentRoundTeamsPlayed: updatedTeamsPlayed,
           currentTeamIndex: nextTeamIndex,
-          roundNumber: newRoundNumber,
-          status: 'category-select',
+          status: 'category-select', // Back to category select to show "Start Round" for next team
           timerSeconds: TIMER_DURATION,
           hintUsed: false,
           showHint: false,
+        };
+      }
+
+      case 'NEXT_CATEGORY': {
+        return {
+          ...state,
+          currentCategoryId: null,
+          currentRoundTeamsPlayed: [],
+          status: 'category-select',
         };
       }
 
@@ -264,6 +343,26 @@ function createGameReducer(getCategories: () => Category[]) {
           teams: state.teams.map((team) => ({ ...team, score: 0 })),
         };
 
+      case 'RESET_TOURNAMENT':
+        return {
+          ...state,
+          status: 'tournament-setup',
+          currentTeamIndex: 0,
+          currentCategoryId: null,
+          tournamentCategories: [],
+          playedCategories: [],
+          currentRoundTeamsPlayed: [],
+          wordsQueue: [],
+          guessedWords: [],
+          skippedWords: [],
+          timerSeconds: TIMER_DURATION,
+          isTimerRunning: false,
+          hintUsed: false,
+          showHint: false,
+          categoryResults: [],
+          teams: state.teams.map((team) => ({ ...team, score: 0 })),
+        };
+
       case 'LOAD_STATE':
         return action.payload;
 
@@ -279,10 +378,10 @@ interface GameContextType {
   categories: Category[];
   createRoom: () => string;
   joinRoom: (code: string) => boolean;
-  startGame: () => void;
   saveToLocalStorage: () => void;
   loadFromLocalStorage: () => boolean;
   refreshCategories: () => void;
+  getCategoryById: (id: string) => Category | undefined;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -298,7 +397,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setCategories(loadCategories());
   }, []);
 
-  // Listen for storage changes (when admin updates words)
+  const getCategoryById = useCallback((id: string) => {
+    return categories.find((c) => c.id === id);
+  }, [categories]);
+
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === WORDS_STORAGE_KEY) {
@@ -320,24 +422,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createRoom = useCallback((): string => {
-    refreshCategories(); // Reload categories when creating a new room
+    refreshCategories();
     const code = generateRoomCode();
     dispatch({ type: 'SET_ROOM_CODE', payload: code });
-    dispatch({ type: 'SET_STATUS', payload: 'waiting' });
+    dispatch({ type: 'SET_STATUS', payload: 'tournament-setup' });
     return code;
   }, [generateRoomCode, refreshCategories]);
 
   const joinRoom = useCallback((code: string): boolean => {
-    refreshCategories(); // Reload categories when joining
+    refreshCategories();
     dispatch({ type: 'SET_ROOM_CODE', payload: code.toUpperCase() });
     return true;
   }, [refreshCategories]);
-
-  const startGame = useCallback(() => {
-    if (state.selectedCategories.length > 0) {
-      dispatch({ type: 'SET_STATUS', payload: 'category-select' });
-    }
-  }, [state.selectedCategories]);
 
   const saveToLocalStorage = useCallback(() => {
     localStorage.setItem('elias-game-state', JSON.stringify(state));
@@ -357,14 +453,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return false;
   }, []);
 
-  // Auto-save state changes
   useEffect(() => {
     if (state.roomCode) {
       saveToLocalStorage();
     }
   }, [state, saveToLocalStorage]);
 
-  // Timer effect
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (state.isTimerRunning && state.timerSeconds > 0) {
@@ -381,10 +475,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     categories,
     createRoom,
     joinRoom,
-    startGame,
     saveToLocalStorage,
     loadFromLocalStorage,
     refreshCategories,
+    getCategoryById,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

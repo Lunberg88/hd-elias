@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '../contexts/GameContext';
-import { Modal, CategorySelector } from '../components';
+import { Modal } from '../components';
 
 export function Home() {
   const navigate = useNavigate();
-  const { state, dispatch, categories, createRoom, joinRoom, loadFromLocalStorage } = useGame();
+  const { state, dispatch, createRoom, joinRoom, loadFromLocalStorage } = useGame();
 
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [showTeamSetupModal, setShowTeamSetupModal] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
   const [teamNames, setTeamNames] = useState(['Команда 1', 'Команда 2']);
 
   const handleCreateRoom = () => {
     createRoom();
-    setShowSetupModal(true);
+    setShowTeamSetupModal(true);
   };
 
   const handleJoinRoom = () => {
@@ -31,42 +31,19 @@ export function Home() {
     }
   };
 
-  const handleStartGame = () => {
-    if (state.selectedCategories.length === 0) {
-      return;
-    }
-
+  const handleStartTournament = () => {
     // Update team names
     dispatch({
       type: 'SET_TEAMS',
       payload: state.teams.map((team, index) => ({
         ...team,
         name: teamNames[index] || team.name,
+        score: 0, // Reset scores
       })),
     });
 
-    dispatch({ type: 'SET_STATUS', payload: 'category-select' });
-    setShowSetupModal(false);
+    setShowTeamSetupModal(false);
     navigate('/game');
-  };
-
-  const handleToggleCategory = (categoryId: string) => {
-    const current = state.selectedCategories;
-    const newSelected = current.includes(categoryId)
-      ? current.filter((id) => id !== categoryId)
-      : [...current, categoryId];
-    dispatch({ type: 'SET_SELECTED_CATEGORIES', payload: newSelected });
-  };
-
-  const handleSelectAll = () => {
-    if (state.selectedCategories.length === categories.length) {
-      dispatch({ type: 'SET_SELECTED_CATEGORIES', payload: [] });
-    } else {
-      dispatch({
-        type: 'SET_SELECTED_CATEGORIES',
-        payload: categories.map((c) => c.id),
-      });
-    }
   };
 
   const handleContinueGame = () => {
@@ -87,14 +64,14 @@ export function Home() {
           </h1>
           <p className="text-xl text-purple-300">для IT-рекрутерів</p>
           <p className="text-sm text-white/60 mt-2">
-            Пояснюй слова — збирай бали — перемагай!
+            Турнірний режим — грайте категорія за категорією!
           </p>
         </div>
 
         {/* Main Actions */}
         <div className="space-y-4">
           <button onClick={handleCreateRoom} className="btn-primary w-full text-lg">
-            🎮 Створити гру
+            🏆 Створити турнір
           </button>
 
           <button
@@ -109,7 +86,7 @@ export function Home() {
               onClick={handleContinueGame}
               className="btn-secondary w-full text-lg border-yellow-500/50"
             >
-              ⏯️ Продовжити гру
+              ⏯️ Продовжити турнір
             </button>
           )}
 
@@ -129,23 +106,23 @@ export function Home() {
           <ul className="space-y-2 text-sm text-white/80">
             <li className="flex gap-2">
               <span>1️⃣</span>
-              <span>Створіть гру та поділіться кодом з командами</span>
+              <span>Створіть турнір та оберіть категорії для гри</span>
             </li>
             <li className="flex gap-2">
               <span>2️⃣</span>
-              <span>Оберіть категорії слів для гри</span>
+              <span>Кожна категорія — окремий раунд. Обидві команди грають її по черзі</span>
             </li>
             <li className="flex gap-2">
               <span>3️⃣</span>
-              <span>Пояснюйте слова за 60 секунд без використання однокореневих слів</span>
+              <span>Пояснюйте слова за 60 секунд. +1 бал за вгадане, −1 за підказку</span>
             </li>
             <li className="flex gap-2">
               <span>4️⃣</span>
-              <span>Ведучий відмічає вгадані слова (+1 бал)</span>
+              <span>Бали накопичуються протягом всього турніру</span>
             </li>
             <li className="flex gap-2">
               <span>5️⃣</span>
-              <span>Використання підказки коштує −1 бал</span>
+              <span>Після всіх категорій — фінальний екран з переможцем!</span>
             </li>
           </ul>
         </div>
@@ -186,11 +163,11 @@ export function Home() {
         </div>
       </Modal>
 
-      {/* Setup Modal */}
+      {/* Team Setup Modal */}
       <Modal
-        isOpen={showSetupModal}
-        onClose={() => setShowSetupModal(false)}
-        title="Налаштування гри"
+        isOpen={showTeamSetupModal}
+        onClose={() => setShowTeamSetupModal(false)}
+        title="Налаштування команд"
       >
         <div className="space-y-6">
           {/* Room Code */}
@@ -208,41 +185,35 @@ export function Home() {
           {/* Team Names */}
           <div>
             <label className="block text-sm text-white/60 mb-2">Назви команд</label>
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                value={teamNames[0]}
-                onChange={(e) => setTeamNames([e.target.value, teamNames[1]])}
-                placeholder="Команда 1"
-                className="input"
-              />
-              <input
-                type="text"
-                value={teamNames[1]}
-                onChange={(e) => setTeamNames([teamNames[0], e.target.value])}
-                placeholder="Команда 2"
-                className="input"
-              />
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500" />
+                <input
+                  type="text"
+                  value={teamNames[0]}
+                  onChange={(e) => setTeamNames([e.target.value, teamNames[1]])}
+                  placeholder="Команда 1"
+                  className="input flex-1"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="w-4 h-4 rounded-full bg-gradient-to-r from-pink-500 to-rose-500" />
+                <input
+                  type="text"
+                  value={teamNames[1]}
+                  onChange={(e) => setTeamNames([teamNames[0], e.target.value])}
+                  placeholder="Команда 2"
+                  className="input flex-1"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Categories */}
-          <div>
-            <label className="block text-sm text-white/60 mb-2">Оберіть категорії</label>
-            <CategorySelector
-              categories={categories}
-              selectedCategories={state.selectedCategories}
-              onToggleCategory={handleToggleCategory}
-              onSelectAll={handleSelectAll}
-            />
-          </div>
-
           <button
-            onClick={handleStartGame}
-            disabled={state.selectedCategories.length === 0}
+            onClick={handleStartTournament}
             className="btn-success w-full"
           >
-            🎮 Почати гру ({state.selectedCategories.length} категорій)
+            🏆 Налаштувати турнір
           </button>
         </div>
       </Modal>

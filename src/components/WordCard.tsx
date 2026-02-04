@@ -6,9 +6,10 @@ interface WordCardProps {
   showHint: boolean;
   onShowHint: () => void;
   hintUsed: boolean;
+  teamScore?: number;
 }
 
-export function WordCard({ word, showHint, onShowHint, hintUsed }: WordCardProps) {
+export function WordCard({ word, showHint, onShowHint, hintUsed, teamScore = 0 }: WordCardProps) {
   if (!word) {
     return (
       <div className="word-card">
@@ -16,6 +17,9 @@ export function WordCard({ word, showHint, onShowHint, hintUsed }: WordCardProps
       </div>
     );
   }
+
+  // Hint will cause -1 point when "Guessed" is pressed
+  const hintPenaltyText = '(−1 бал при вгадуванні)';
 
   return (
     <div className="word-card">
@@ -36,7 +40,7 @@ export function WordCard({ word, showHint, onShowHint, hintUsed }: WordCardProps
           disabled={hintUsed}
           className="btn-warning text-sm"
         >
-          {hintUsed ? 'Підказку вже використано' : 'Показати підказку (−1 бал)'}
+          {hintUsed ? 'Підказку вже використано' : `Показати підказку ${hintPenaltyText}`}
         </button>
       )}
     </div>
